@@ -7,6 +7,18 @@ from uuid import uuid4
 import requests
 from flask import Flask, jsonify, request
 
+from random import seed
+from random import random
+from random import shuffle
+
+import threading
+from time import localtime
+from time import sleep
+from datetime import datetime
+from os import system
+
+p = 0.8
+interval = 3
 
 class Blockchain:
     def __init__(self):
@@ -72,7 +84,8 @@ class Blockchain:
         :return: True if our chain was replaced, False if not
         """
 
-        neighbours = self.nodes
+        neighbours = list(self.nodes)
+        shuffle(neighbours)
         new_chain = None
 
         # We're only looking for chains longer than ours
@@ -190,6 +203,30 @@ class Blockchain:
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:4] == "0000"
 
+    def common_chain_length(self):
+        neighbours = self.nodes
+        chains = []
+
+        # Grab and verify the chains from all the nodes in our network
+        for node in neighbours:
+            response = requests.get(f'http://{node}/chain')
+
+            if response.status_code == 200:
+                chain = response.json()['chain']
+                chains.append(chain)
+
+        cur = 0
+        while cur < len(self.chain):
+            same = True
+            for chain in chains:
+                if chain and chain[cur] != self.chain[cur]:
+                    same = False
+                    break
+            if not same:
+                break
+            cur = cur + 1
+
+        return cur + 1
 
 # Instantiate the Node
 app = Flask(__name__)
@@ -200,9 +237,15 @@ node_identifier = str(uuid4()).replace('-', '')
 # Instantiate the Blockchain
 blockchain = Blockchain()
 
-
-@app.route('/mine', methods=['GET'])
-def mine():
+def mine_func(port):
+    r = random()
+    if r >= p:
+        response = {
+        'message': "Failed to mine"
+        }
+        return response
+        
+    print (str(port-5000) + ": Success!")
     # We run the proof of work algorithm to get the next proof...
     last_block = blockchain.last_block
     proof = blockchain.proof_of_work(last_block)
@@ -226,6 +269,12 @@ def mine():
         'proof': block['proof'],
         'previous_hash': block['previous_hash'],
     }
+    return response
+    
+
+@app.route('/mine', methods=['GET'])
+def mine():
+    response = mine_func(request)
     return jsonify(response), 200
 
 
@@ -257,6 +306,7 @@ def full_chain():
 @app.route('/nodes/register', methods=['POST'])
 def register_nodes():
     values = request.get_json()
+    print(values)
 
     nodes = values.get('nodes')
     if nodes is None:
@@ -272,8 +322,7 @@ def register_nodes():
     return jsonify(response), 201
 
 
-@app.route('/nodes/resolve', methods=['GET'])
-def consensus():
+def consensus_func():
     replaced = blockchain.resolve_conflicts()
 
     if replaced:
@@ -287,9 +336,46 @@ def consensus():
             'chain': blockchain.chain
         }
 
+    return response
+
+@app.route('/nodes/resolve', methods=['GET'])
+def consensus():
+    response = consensus_func()
     return jsonify(response), 200
 
 
+def try_mine(port):
+    sleep(10)
+    length = blockchain.common_chain_length()
+    start = datetime.now()
+    # outfile = None
+    # if port == 5000:
+    #     outfile = open("output.txt", "w")
+    while True:
+        sec = localtime().tm_sec
+        now = datetime.now()
+        if sec % interval == 0:
+            print(str(port-5000)+": Trying to mine")
+            mine_func(port)
+            sleep(1)
+            consensus_func()
+            sleep(1)
+            if port == 5000:
+                new_length = blockchain.common_chain_length()
+                if new_length > length:
+                    length = new_length
+                    elapsed = now - start
+                    with open("outfile.txt", "a") as outfile:
+                        outfile.write(str(length) + ": " + str(elapsed.seconds) + "\n")
+                    # print("SAME SIZE: %d: %d" %(length, elapsed.seconds) )
+                    # system("echo %d: %d >> output.txt" % (length, elapsed.seconds))
+
+            
+            
+#def start_app():
+
+    
+    
 if __name__ == '__main__':
     from argparse import ArgumentParser
 
@@ -297,5 +383,11 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--port', default=5000, type=int, help='port to listen on')
     args = parser.parse_args()
     port = args.port
-
-    app.run(host='0.0.0.0', port=port)
+    #app.run(host='0.0.0.0', port=port)
+    
+    webapp = threading.Thread(target=app.run, args=('0.0.0.0', port))
+    mining = threading.Thread(target=try_mine, args=(port,))
+    
+    webapp.start()
+    mining.start()
+    #app.run(host='0.0.0.0', port=port)
