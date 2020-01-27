@@ -5,9 +5,9 @@ from time import sleep
 nodes = 5
 
 for node in range(nodes):
-    system("pipenv run python blockchain.py -p %d &" % (5000 + node))
+    system("python blockchain.py -p %d &" % (5000 + node))
 
-system("pipenv run python blockchain_adversary.py -p %d &" % (5000 + nodes))
+system("python blockchain_adversary.py -p %d &" % (5000 + nodes))
 
 sleep(5)
 
