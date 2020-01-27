@@ -375,7 +375,7 @@ def try_mine(port):
         sec = localtime().tm_sec
         now = datetime.now()
         if sec % interval == 0:
-            print(str(port-5000)+": Trying to mine")
+            # print(str(port-5000)+": Trying to mine")
             # mine_func(port)
             sleep(0.5)
 
