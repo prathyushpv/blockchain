@@ -17,7 +17,11 @@ from time import sleep
 from datetime import datetime
 from os import system
 
-p = 0.8
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
+p = 0.1
 interval = 3
 
 class Blockchain:
@@ -59,9 +63,9 @@ class Blockchain:
 
         while current_index < len(chain):
             block = chain[current_index]
-            print(f'{last_block}')
-            print(f'{block}')
-            print("\n-----------\n")
+            # print(f'{last_block}')
+            # print(f'{block}')
+            # print("\n-----------\n")
             # Check that the hash of the block is correct
             last_block_hash = self.hash(last_block)
             if block['previous_hash'] != last_block_hash:
@@ -219,7 +223,7 @@ class Blockchain:
         while cur < len(self.chain):
             same = True
             for chain in chains:
-                if chain and chain[cur] != self.chain[cur]:
+                if cur < len(chain) and chain[cur] != self.chain[cur]:
                     same = False
                     break
             if not same:
@@ -365,10 +369,10 @@ def try_mine(port):
                 if new_length > length:
                     length = new_length
                     elapsed = now - start
-                    with open("outfile.txt", "a") as outfile:
-                        outfile.write(str(length) + ": " + str(elapsed.seconds) + "\n")
+                    # with open("outfile.txt", "a") as outfile:
+                    #     outfile.write(str(length) + ": " + str(elapsed.seconds) + "\n")
                     # print("SAME SIZE: %d: %d" %(length, elapsed.seconds) )
-                    # system("echo %d: %d >> output.txt" % (length, elapsed.seconds))
+                    system("echo %d, %d >> output.txt" % (length, elapsed.seconds))
 
             
             
