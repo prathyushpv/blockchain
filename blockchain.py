@@ -10,6 +10,7 @@ from flask import Flask, jsonify, request
 from random import seed
 from random import random
 from random import shuffle
+from random import randint
 
 import threading
 from time import localtime
@@ -21,15 +22,17 @@ import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-p = 0.1
+p = 0.8
 interval = 3
+CHAINS = 10
 
 class Blockchain:
-    def __init__(self):
+    def __init__(self, chain_id):
         self.current_transactions = []
         self.chain = []
+        # self.voterchains = [[] for i in range(voterchains)]
         self.nodes = set()
-
+        self.chain_id = chain_id
         # Create the genesis block
         self.new_block(previous_hash='1', proof=100)
 
@@ -97,7 +100,7 @@ class Blockchain:
 
         # Grab and verify the chains from all the nodes in our network
         for node in neighbours:
-            response = requests.get(f'http://{node}/chain')
+            response = requests.post(f'http://{node}/chain', json={'chain_id': self.chain_id})
 
             if response.status_code == 200:
                 length = response.json()['length']
@@ -207,15 +210,20 @@ class Blockchain:
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:4] == "0000"
 
-    def common_chain_length(self):
+    def common_chain_length(self, chain_id):
         neighbours = self.nodes
         chains = []
+        print("hi1")
+        print(self.nodes)
 
         # Grab and verify the chains from all the nodes in our network
         for node in neighbours:
-            response = requests.get(f'http://{node}/chain')
-
+            print("hi2")
+            response = requests.post(f'http://{node}/chain', json={'chain_id': chain_id})
+            print({'chain_id': chain_id})
+            print(response.status_code)
             if response.status_code == 200:
+                print(response.json())
                 chain = response.json()['chain']
                 chains.append(chain)
 
@@ -234,37 +242,38 @@ class Blockchain:
 
 # Instantiate the Node
 app = Flask(__name__)
-
+app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
 # Generate a globally unique address for this node
 node_identifier = str(uuid4()).replace('-', '')
 
 # Instantiate the Blockchain
-blockchain = Blockchain()
+# blockchain = Blockchain()
+blockchains = [Blockchain(i) for i in range(CHAINS)]
 
-def mine_func(port):
+def mine_func(port, chain_id):
     r = random()
     if r >= p:
         response = {
         'message': "Failed to mine"
         }
         return response
-        
+    # chain_id = int(random() * 100000) % CHAINS
     print (str(port-5000) + ": Success!")
     # We run the proof of work algorithm to get the next proof...
-    last_block = blockchain.last_block
-    proof = blockchain.proof_of_work(last_block)
+    last_block = blockchains[chain_id].last_block
+    proof = blockchains[chain_id].proof_of_work(last_block)
 
     # We must receive a reward for finding the proof.
     # The sender is "0" to signify that this node has mined a new coin.
-    blockchain.new_transaction(
+    blockchains[chain_id].new_transaction(
         sender="0",
         recipient=node_identifier,
         amount=1,
     )
 
     # Forge the new Block by adding it to the chain
-    previous_hash = blockchain.hash(last_block)
-    block = blockchain.new_block(proof, previous_hash)
+    previous_hash = blockchains[chain_id].hash(last_block)
+    block = blockchains[chain_id].new_block(proof, previous_hash)
 
     response = {
         'message': "New Block Forged",
@@ -272,6 +281,7 @@ def mine_func(port):
         'transactions': block['transactions'],
         'proof': block['proof'],
         'previous_hash': block['previous_hash'],
+        'chain_id' : chain_id
     }
     return response
     
@@ -298,11 +308,20 @@ def new_transaction():
     return jsonify(response), 201
 
 
-@app.route('/chain', methods=['GET'])
+@app.route('/chain', methods=['POST'])
 def full_chain():
+    values = request.get_json()
+    print("Values")
+    print(values)
+
+    # Check that the required fields are in the POST'ed data
+    required = ['chain_id']
+    if not all(k in values for k in required):
+        return 'Missing values', 400
+    
     response = {
-        'chain': blockchain.chain,
-        'length': len(blockchain.chain),
+        'chain': blockchains[values['chain_id']].chain,
+        'length': len(blockchains[values['chain_id']].chain),
     }
     return jsonify(response), 200
 
@@ -315,9 +334,9 @@ def register_nodes():
     nodes = values.get('nodes')
     if nodes is None:
         return "Error: Please supply a valid list of nodes", 400
-
-    for node in nodes:
-        blockchain.register_node(node)
+    for blockchain in blockchains:
+        for node in nodes:
+            blockchain.register_node(node)
 
     response = {
         'message': 'New nodes have been added',
@@ -327,18 +346,20 @@ def register_nodes():
 
 
 def consensus_func():
-    replaced = blockchain.resolve_conflicts()
+    response = []
+    for blockchain in blockchains:
+        replaced = blockchain.resolve_conflicts()
 
-    if replaced:
-        response = {
-            'message': 'Our chain was replaced',
-            'new_chain': blockchain.chain
-        }
-    else:
-        response = {
-            'message': 'Our chain is authoritative',
-            'chain': blockchain.chain
-        }
+        if replaced:
+            response.append({
+                'message': 'Our chain was replaced',
+                'new_chain': blockchain.chain
+            })
+        else:
+            response.append({
+                'message': 'Our chain is authoritative',
+                'chain': blockchain.chain
+            })
 
     return response
 
@@ -350,7 +371,8 @@ def consensus():
 
 def try_mine(port):
     sleep(10)
-    length = blockchain.common_chain_length()
+    chain_id = randint(0, CHAINS-1)
+    length = blockchains[chain_id].common_chain_length(chain_id)
     start = datetime.now()
     # outfile = None
     # if port == 5000:
@@ -360,12 +382,12 @@ def try_mine(port):
         now = datetime.now()
         if sec % interval == 0:
             print(str(port-5000)+": Trying to mine")
-            mine_func(port)
+            mine_func(port, chain_id)
             sleep(1)
             consensus_func()
             sleep(1)
             if port == 5000:
-                new_length = blockchain.common_chain_length()
+                new_length = blockchains[chain_id].common_chain_length(chain_id)
                 if new_length > length:
                     length = new_length
                     elapsed = now - start
